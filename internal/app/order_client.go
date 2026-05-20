@@ -1,6 +1,7 @@
 package app
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -79,6 +80,32 @@ func (c *OrderClient) ValidateOrderOwnership(ctx context.Context, orderID, custo
 
 	if orderCustomerID != customerID {
 		return offerDomain.ErrUnauthorized
+	}
+
+	return nil
+}
+
+// AssignOrder updates the order status to "assigned" and sets the accepted offer ID.
+func (c *OrderClient) AssignOrder(ctx context.Context, orderID, offerID uuid.UUID) error {
+	url := fmt.Sprintf("%s/internal/orders/%s/assign", c.baseURL, orderID.String())
+
+	body := map[string]string{"offer_id": offerID.String()}
+	bodyJSON, _ := json.Marshal(body)
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(bodyJSON))
+	if err != nil {
+		return fmt.Errorf("failed to create assign request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("failed to assign order: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("order service returned status %d", resp.StatusCode)
 	}
 
 	return nil

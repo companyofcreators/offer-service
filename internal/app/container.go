@@ -55,7 +55,7 @@ func NewContainer(ctx context.Context) (*Container, error) {
 	orderClient := NewOrderClient(cfg.OrderServiceURL, log)
 
 	// Domain service
-	service := offerDomain.NewService(offerRepo, eventRepo, producer, orderClient)
+	service := offerDomain.NewService(offerRepo, eventRepo, producer, orderClient, log)
 
 	// Application use cases
 	sendOfferUC := offerApp.NewSendOfferUseCase(service)

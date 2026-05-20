@@ -13,6 +13,7 @@ import (
 
 	offerApp "github.com/companyofcreators/offer-service/internal/application/offer"
 	offerDomain "github.com/companyofcreators/offer-service/internal/domain/offer"
+	"github.com/companyofcreators/offer-service/pkg"
 )
 
 // Handler handles HTTP requests for the offer service.
@@ -53,13 +54,13 @@ func NewHandler(
 func (h *Handler) SendOffer(w http.ResponseWriter, r *http.Request) {
 	userID, err := extractUserID(r)
 	if err != nil {
-		h.writeError(w, http.StatusUnauthorized, "missing or invalid user id header")
+		h.writeError(w, http.StatusUnauthorized, "отсутствует или недействителен заголовок user id")
 		return
 	}
 
 	role := r.Header.Get("X-User-Role")
 	if role != "master" {
-		h.writeError(w, http.StatusForbidden, "only masters can send offers")
+		h.writeError(w, http.StatusForbidden, "только мастера могут отправлять предложения")
 		return
 	}
 
@@ -69,16 +70,19 @@ func (h *Handler) SendOffer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := h.validate.Struct(req); err != nil {
-		h.writeError(w, http.StatusBadRequest, "validation failed: "+err.Error())
+	if verrs := pkg.ValidateStruct(req); verrs != nil {
+		pkg.WriteValidationErrors(w, verrs)
 		return
 	}
 
+	masterEmail := r.Header.Get("X-User-Email")
+
 	offer, err := h.sendOffer.Execute(r.Context(), offerApp.SendOfferInput{
-		OrderID:  req.OrderID,
-		MasterID: userID,
-		Price:    req.Price,
-		Message:  req.Message,
+		OrderID:     req.OrderID,
+		MasterID:    userID,
+		Price:       req.Price,
+		Message:     req.Message,
+		MasterEmail: masterEmail,
 	})
 	if err != nil {
 		h.handleDomainError(w, r.Context(), err)
@@ -92,13 +96,13 @@ func (h *Handler) SendOffer(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) WithdrawOffer(w http.ResponseWriter, r *http.Request) {
 	userID, err := extractUserID(r)
 	if err != nil {
-		h.writeError(w, http.StatusUnauthorized, "missing or invalid user id header")
+		h.writeError(w, http.StatusUnauthorized, "отсутствует или недействителен заголовок user id")
 		return
 	}
 
 	offerID, err := extractOfferID(r)
 	if err != nil {
-		h.writeError(w, http.StatusBadRequest, "invalid offer id")
+		h.writeError(w, http.StatusBadRequest, "недействительный ID предложения")
 		return
 	}
 
@@ -118,25 +122,28 @@ func (h *Handler) WithdrawOffer(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) AcceptOffer(w http.ResponseWriter, r *http.Request) {
 	userID, err := extractUserID(r)
 	if err != nil {
-		h.writeError(w, http.StatusUnauthorized, "missing or invalid user id header")
+		h.writeError(w, http.StatusUnauthorized, "отсутствует или недействителен заголовок user id")
 		return
 	}
 
 	role := r.Header.Get("X-User-Role")
 	if role != "user" && role != "customer" {
-		h.writeError(w, http.StatusForbidden, "only customers can accept offers")
+		h.writeError(w, http.StatusForbidden, "только заказчики могут принимать предложения")
 		return
 	}
 
 	offerID, err := extractOfferID(r)
 	if err != nil {
-		h.writeError(w, http.StatusBadRequest, "invalid offer id")
+		h.writeError(w, http.StatusBadRequest, "недействительный ID предложения")
 		return
 	}
 
+	customerEmail := r.Header.Get("X-User-Email")
+
 	offer, err := h.acceptOffer.Execute(r.Context(), offerApp.AcceptOfferInput{
-		OfferID:    offerID,
-		CustomerID: userID,
+		OfferID:       offerID,
+		CustomerID:    userID,
+		CustomerEmail: customerEmail,
 	})
 	if err != nil {
 		h.handleDomainError(w, r.Context(), err)
@@ -150,19 +157,19 @@ func (h *Handler) AcceptOffer(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) RejectOffer(w http.ResponseWriter, r *http.Request) {
 	userID, err := extractUserID(r)
 	if err != nil {
-		h.writeError(w, http.StatusUnauthorized, "missing or invalid user id header")
+		h.writeError(w, http.StatusUnauthorized, "отсутствует или недействителен заголовок user id")
 		return
 	}
 
 	role := r.Header.Get("X-User-Role")
 	if role != "user" && role != "customer" {
-		h.writeError(w, http.StatusForbidden, "only customers can reject offers")
+		h.writeError(w, http.StatusForbidden, "только заказчики могут отклонять предложения")
 		return
 	}
 
 	offerID, err := extractOfferID(r)
 	if err != nil {
-		h.writeError(w, http.StatusBadRequest, "invalid offer id")
+		h.writeError(w, http.StatusBadRequest, "недействительный ID предложения")
 		return
 	}
 
@@ -182,19 +189,19 @@ func (h *Handler) RejectOffer(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) CounterOffer(w http.ResponseWriter, r *http.Request) {
 	userID, err := extractUserID(r)
 	if err != nil {
-		h.writeError(w, http.StatusUnauthorized, "missing or invalid user id header")
+		h.writeError(w, http.StatusUnauthorized, "отсутствует или недействителен заголовок user id")
 		return
 	}
 
 	role := r.Header.Get("X-User-Role")
 	if role != "user" && role != "customer" {
-		h.writeError(w, http.StatusForbidden, "only customers can counter offers")
+		h.writeError(w, http.StatusForbidden, "только заказчики могут делать контр-предложения")
 		return
 	}
 
 	offerID, err := extractOfferID(r)
 	if err != nil {
-		h.writeError(w, http.StatusBadRequest, "invalid offer id")
+		h.writeError(w, http.StatusBadRequest, "недействительный ID предложения")
 		return
 	}
 
@@ -204,8 +211,8 @@ func (h *Handler) CounterOffer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := h.validate.Struct(req); err != nil {
-		h.writeError(w, http.StatusBadRequest, "validation failed: "+err.Error())
+	if verrs := pkg.ValidateStruct(req); verrs != nil {
+		pkg.WriteValidationErrors(w, verrs)
 		return
 	}
 
@@ -227,7 +234,7 @@ func (h *Handler) CounterOffer(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) GetOffer(w http.ResponseWriter, r *http.Request) {
 	offerID, err := extractOfferID(r)
 	if err != nil {
-		h.writeError(w, http.StatusBadRequest, "invalid offer id")
+		h.writeError(w, http.StatusBadRequest, "недействительный ID предложения")
 		return
 	}
 
@@ -251,7 +258,7 @@ func (h *Handler) ListOffers(w http.ResponseWriter, r *http.Request) {
 	if orderIDStr != "" {
 		orderID, err := uuid.Parse(orderIDStr)
 		if err != nil {
-			h.writeError(w, http.StatusBadRequest, "invalid order_id")
+			h.writeError(w, http.StatusBadRequest, "недействительный order_id")
 			return
 		}
 
@@ -268,7 +275,7 @@ func (h *Handler) ListOffers(w http.ResponseWriter, r *http.Request) {
 	if masterIDStr != "" {
 		masterID, err := uuid.Parse(masterIDStr)
 		if err != nil {
-			h.writeError(w, http.StatusBadRequest, "invalid master_id")
+			h.writeError(w, http.StatusBadRequest, "недействительный master_id")
 			return
 		}
 
@@ -276,7 +283,7 @@ func (h *Handler) ListOffers(w http.ResponseWriter, r *http.Request) {
 		if statusStr != "" {
 			s := offerDomain.OfferStatus(statusStr)
 			if !s.IsValid() {
-				h.writeError(w, http.StatusBadRequest, "invalid status filter")
+				h.writeError(w, http.StatusBadRequest, "недопустимый фильтр статуса")
 				return
 			}
 			statusFilter = &s
@@ -301,14 +308,14 @@ func (h *Handler) ListOffers(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	h.writeError(w, http.StatusBadRequest, "either order_id or master_id query parameter is required")
+	h.writeError(w, http.StatusBadRequest, "требуется параметр order_id или master_id")
 }
 
 // GetOfferHistory handles GET /internal/offers/{id}/history
 func (h *Handler) GetOfferHistory(w http.ResponseWriter, r *http.Request) {
 	offerID, err := extractOfferID(r)
 	if err != nil {
-		h.writeError(w, http.StatusBadRequest, "invalid offer id")
+		h.writeError(w, http.StatusBadRequest, "недействительный ID предложения")
 		return
 	}
 
@@ -325,7 +332,7 @@ func (h *Handler) GetOfferHistory(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) GetOrderHistory(w http.ResponseWriter, r *http.Request) {
 	orderID, err := extractOrderID(r)
 	if err != nil {
-		h.writeError(w, http.StatusBadRequest, "invalid order id")
+		h.writeError(w, http.StatusBadRequest, "недействительный ID заказа")
 		return
 	}
 
@@ -353,7 +360,7 @@ func (h *Handler) writeJSON(w http.ResponseWriter, status int, data interface{})
 
 func (h *Handler) writeError(w http.ResponseWriter, status int, message string) {
 	h.writeJSON(w, status, ErrorResponse{
-		Error:   http.StatusText(status),
+		Error:   statusText(status),
 		Message: message,
 	})
 }
@@ -376,7 +383,30 @@ func (h *Handler) handleDomainError(w http.ResponseWriter, ctx context.Context, 
 		h.writeError(w, http.StatusBadRequest, err.Error())
 	default:
 		h.log.ErrorContext(ctx, "unexpected error", "error", err.Error())
-		h.writeError(w, http.StatusInternalServerError, "internal server error")
+		h.writeError(w, http.StatusInternalServerError, "внутренняя ошибка сервера")
+	}
+}
+
+func statusText(code int) string {
+	switch code {
+	case http.StatusBadRequest:
+		return "некорректный запрос"
+	case http.StatusUnauthorized:
+		return "не авторизован"
+	case http.StatusForbidden:
+		return "доступ запрещён"
+	case http.StatusNotFound:
+		return "не найдено"
+	case http.StatusConflict:
+		return "конфликт"
+	case http.StatusUnprocessableEntity:
+		return "ошибка валидации"
+	case http.StatusTooManyRequests:
+		return "слишком много запросов"
+	case http.StatusInternalServerError:
+		return "внутренняя ошибка сервера"
+	default:
+		return "ошибка"
 	}
 }
 

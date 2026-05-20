@@ -20,13 +20,14 @@ func NewSendOfferUseCase(service *offerDomain.Service) *SendOfferUseCase {
 
 // SendOfferInput represents the input for sending an offer.
 type SendOfferInput struct {
-	OrderID  uuid.UUID
-	MasterID uuid.UUID
-	Price    float64
-	Message  string
+	OrderID     uuid.UUID
+	MasterID    uuid.UUID
+	Price       float64
+	Message     string
+	MasterEmail string
 }
 
 // Execute creates a new offer.
 func (uc *SendOfferUseCase) Execute(ctx context.Context, input SendOfferInput) (*offerDomain.Offer, error) {
-	return uc.service.SendOffer(ctx, input.OrderID, input.MasterID, input.Price, input.Message)
+	return uc.service.SendOffer(ctx, input.OrderID, input.MasterID, input.Price, input.Message, input.MasterEmail)
 }

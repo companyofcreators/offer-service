@@ -20,11 +20,12 @@ func NewAcceptOfferUseCase(service *offerDomain.Service) *AcceptOfferUseCase {
 
 // AcceptOfferInput represents the input for accepting an offer.
 type AcceptOfferInput struct {
-	OfferID    uuid.UUID
-	CustomerID uuid.UUID
+	OfferID       uuid.UUID
+	CustomerID    uuid.UUID
+	CustomerEmail string
 }
 
 // Execute accepts the offer.
 func (uc *AcceptOfferUseCase) Execute(ctx context.Context, input AcceptOfferInput) (*offerDomain.Offer, error) {
-	return uc.service.AcceptOffer(ctx, input.OfferID, input.CustomerID)
+	return uc.service.AcceptOffer(ctx, input.OfferID, input.CustomerID, input.CustomerEmail)
 }

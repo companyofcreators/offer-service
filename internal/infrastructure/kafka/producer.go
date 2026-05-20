@@ -22,12 +22,13 @@ type Producer struct {
 // NewProducer creates a new Kafka producer.
 func NewProducer(brokers []string, log *slog.Logger) *Producer {
 	writer := &kafka.Writer{
-		Addr:         kafka.TCP(brokers...),
-		Balancer:     &kafka.LeastBytes{},
-		BatchTimeout: 10 * time.Millisecond,
-		BatchSize:    1,
-		RequiredAcks: kafka.RequireOne,
-		Compression:  kafka.Snappy,
+		Addr:                   kafka.TCP(brokers...),
+		Balancer:               &kafka.LeastBytes{},
+		BatchTimeout:           10 * time.Millisecond,
+		BatchSize:              1,
+		RequiredAcks:           kafka.RequireOne,
+		Compression:            kafka.Snappy,
+		AllowAutoTopicCreation: true,
 	}
 
 	return &Producer{
@@ -42,27 +43,29 @@ func (p *Producer) Close() error {
 }
 
 // PublishOfferCreated publishes an offer.created event.
-func (p *Producer) PublishOfferCreated(ctx context.Context, o *offer.Offer) error {
+func (p *Producer) PublishOfferCreated(ctx context.Context, o *offer.Offer, masterEmail string) error {
 	msg := map[string]interface{}{
-		"offer_id":  o.ID.String(),
-		"order_id":  o.OrderID.String(),
-		"master_id": o.MasterID.String(),
-		"price":     o.Price,
-		"timestamp": o.CreatedAt.Format(time.RFC3339),
+		"offer_id":     o.ID.String(),
+		"order_id":     o.OrderID.String(),
+		"master_id":    o.MasterID.String(),
+		"master_email": masterEmail,
+		"price":        o.Price,
+		"timestamp":    o.CreatedAt.Format(time.RFC3339),
 	}
 
 	return p.publish(ctx, "offer.created", o.ID, msg)
 }
 
 // PublishOfferAccepted publishes an offer.accepted event.
-func (p *Producer) PublishOfferAccepted(ctx context.Context, o *offer.Offer, customerID uuid.UUID) error {
+func (p *Producer) PublishOfferAccepted(ctx context.Context, o *offer.Offer, customerID uuid.UUID, customerEmail string) error {
 	msg := map[string]interface{}{
-		"offer_id":    o.ID.String(),
-		"order_id":    o.OrderID.String(),
-		"master_id":   o.MasterID.String(),
-		"customer_id": customerID.String(),
-		"price":       o.Price,
-		"timestamp":   time.Now().UTC().Format(time.RFC3339),
+		"offer_id":      o.ID.String(),
+		"order_id":      o.OrderID.String(),
+		"master_id":     o.MasterID.String(),
+		"customer_id":   customerID.String(),
+		"customer_email": customerEmail,
+		"price":         o.Price,
+		"timestamp":     time.Now().UTC().Format(time.RFC3339),
 	}
 
 	return p.publish(ctx, "offer.accepted", o.ID, msg)

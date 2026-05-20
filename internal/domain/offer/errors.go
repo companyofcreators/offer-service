@@ -3,13 +3,13 @@ package offer
 import "errors"
 
 var (
-	ErrOfferNotFound       = errors.New("offer not found")
-	ErrOfferNotPending     = errors.New("offer is not in pending status")
-	ErrUnauthorized        = errors.New("user is not authorized to perform this action")
-	ErrAlreadyPendingOffer = errors.New("master already has a pending offer for this order")
-	ErrInvalidPrice        = errors.New("price must be greater than zero")
-	ErrEmptyMessage        = errors.New("message must not be empty")
-	ErrMessageTooLong      = errors.New("message exceeds maximum length of 1000 characters")
-	ErrInvalidOfferID      = errors.New("invalid offer ID")
-	ErrInvalidOrderID      = errors.New("invalid order ID")
+	ErrOfferNotFound       = errors.New("предложение не найдено")
+	ErrOfferNotPending     = errors.New("предложение не в статусе ожидания")
+	ErrUnauthorized        = errors.New("пользователь не авторизован для этого действия")
+	ErrAlreadyPendingOffer = errors.New("у мастера уже есть ожидающее предложение по этому заказу")
+	ErrInvalidPrice        = errors.New("цена должна быть больше нуля")
+	ErrEmptyMessage        = errors.New("сообщение не может быть пустым")
+	ErrMessageTooLong      = errors.New("сообщение превышает максимальную длину в 1000 символов")
+	ErrInvalidOfferID      = errors.New("недействительный ID предложения")
+	ErrInvalidOrderID      = errors.New("недействительный ID заказа")
 )
