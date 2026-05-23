@@ -2,14 +2,18 @@ package main
 
 import (
 	"context"
+	"crypto/rsa"
 	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
 	"time"
 
+	"github.com/golang-jwt/jwt/v5"
+
 	"github.com/companyofcreators/offer-service/internal/app"
 	httpHandler "github.com/companyofcreators/offer-service/internal/interfaces/http"
+	wshandler "github.com/companyofcreators/offer-service/internal/interfaces/ws"
 )
 
 func main() {
@@ -25,8 +29,18 @@ func main() {
 
 	log := container.Logger
 
+	// Load JWT public key for WebSocket authentication
+	jwtPublicKey, err := loadJWTPublicKey(container.Config.JWTPublicKeyPath)
+	if err != nil {
+		log.ErrorContext(ctx, "failed to load JWT public key", "error", err.Error())
+		os.Exit(1)
+	}
+
+	// Create WebSocket handler
+	wsHandler := wshandler.NewHandler(container.WSHub, jwtPublicKey, log, container.Config.WSAllowedOrigin)
+
 	// Create HTTP router
-	router := httpHandler.NewRouter(container.Handler, log)
+	router := httpHandler.NewRouter(container.Handler, container.HeaderSigner, log, wsHandler.Upgrade)
 
 	// Create HTTP server
 	server := &http.Server{
@@ -39,7 +53,10 @@ func main() {
 
 	// Start server in a goroutine
 	go func() {
-		log.InfoContext(ctx, "starting offer service", "address", container.Config.HTTPAddress)
+		log.InfoContext(ctx, "starting offer service",
+			"address", container.Config.HTTPAddress,
+			"ws_endpoint", "ws://"+container.Config.HTTPAddress+"/ws",
+		)
 		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			log.ErrorContext(ctx, "server failed to start", "error", err.Error())
 			os.Exit(1)
@@ -62,4 +79,12 @@ func main() {
 	}
 
 	log.InfoContext(ctx, "offer service stopped")
+}
+
+func loadJWTPublicKey(path string) (*rsa.PublicKey, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	return jwt.ParseRSAPublicKeyFromPEM(data)
 }

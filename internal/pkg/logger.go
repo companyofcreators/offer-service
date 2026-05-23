@@ -26,7 +26,6 @@ func NewLogger(level string) (*slog.Logger, error) {
 
 	handler := slog.NewJSONHandler(os.Stdout, opts)
 	logger := slog.New(handler)
-	slog.SetDefault(logger)
 
 	return logger, nil
 }

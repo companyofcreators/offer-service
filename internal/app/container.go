@@ -12,17 +12,21 @@ import (
 	offerDomain "github.com/companyofcreators/offer-service/internal/domain/offer"
 	"github.com/companyofcreators/offer-service/internal/infrastructure/db"
 	"github.com/companyofcreators/offer-service/internal/infrastructure/kafka"
+	wsinfra "github.com/companyofcreators/offer-service/internal/infrastructure/ws"
 	httpHandler "github.com/companyofcreators/offer-service/internal/interfaces/http"
 	"github.com/companyofcreators/offer-service/internal/pkg"
+	"github.com/companyofcreators/offer-service/pkg/header_auth"
 )
 
 // Container holds all application dependencies.
 type Container struct {
-	Config   *config.Config
-	Logger   *slog.Logger
-	Pool     *sqlx.DB
-	Producer *kafka.Producer
-	Handler  *httpHandler.Handler
+	Config       *config.Config
+	Logger       *slog.Logger
+	Pool         *sqlx.DB
+	Producer     *kafka.Producer
+	HeaderSigner *header_auth.HeaderSigner
+	Handler      *httpHandler.Handler
+	WSHub        *wsinfra.Hub
 }
 
 // NewContainer initializes all application dependencies.
@@ -52,10 +56,14 @@ func NewContainer(ctx context.Context) (*Container, error) {
 	eventRepo := db.NewNegotiationEventRepo(pool)
 
 	// Order client for validating customer ownership
-	orderClient := NewOrderClient(cfg.OrderServiceURL, log)
+	headerSigner := header_auth.NewHeaderSigner(cfg.HeaderHMACKey)
+	orderClient := NewOrderClient(cfg.OrderServiceURL, headerSigner, log)
+
+	// WebSocket Hub (implements offerDomain.Broadcaster)
+	wsHub := wsinfra.NewHub(log)
 
 	// Domain service
-	service := offerDomain.NewService(offerRepo, eventRepo, producer, orderClient, log)
+	service := offerDomain.NewService(offerRepo, eventRepo, producer, orderClient, wsHub, log)
 
 	// Application use cases
 	sendOfferUC := offerApp.NewSendOfferUseCase(service)
@@ -76,11 +84,13 @@ func NewContainer(ctx context.Context) (*Container, error) {
 	)
 
 	return &Container{
-		Config:   cfg,
-		Logger:   log,
-		Pool:     pool,
-		Producer: producer,
-		Handler:  handler,
+		Config:       cfg,
+		Logger:       log,
+		Pool:         pool,
+		Producer:     producer,
+		HeaderSigner: headerSigner,
+		Handler:      handler,
+		WSHub:        wsHub,
 	}, nil
 }
 

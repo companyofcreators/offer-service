@@ -22,13 +22,14 @@ type Producer struct {
 // NewProducer creates a new Kafka producer.
 func NewProducer(brokers []string, log *slog.Logger) *Producer {
 	writer := &kafka.Writer{
-		Addr:                   kafka.TCP(brokers...),
-		Balancer:               &kafka.LeastBytes{},
-		BatchTimeout:           10 * time.Millisecond,
-		BatchSize:              1,
-		RequiredAcks:           kafka.RequireOne,
-		Compression:            kafka.Snappy,
-		AllowAutoTopicCreation: true,
+		Addr:         kafka.TCP(brokers...),
+		Balancer:     &kafka.LeastBytes{},
+		BatchTimeout: 10 * time.Millisecond,
+		BatchSize:    100,
+		RequiredAcks: kafka.RequireAll,
+		Compression:  kafka.Snappy,
+		WriteTimeout: 10 * time.Second,
+		ReadTimeout:  5 * time.Second,
 	}
 
 	return &Producer{
@@ -57,15 +58,16 @@ func (p *Producer) PublishOfferCreated(ctx context.Context, o *offer.Offer, mast
 }
 
 // PublishOfferAccepted publishes an offer.accepted event.
-func (p *Producer) PublishOfferAccepted(ctx context.Context, o *offer.Offer, customerID uuid.UUID, customerEmail string) error {
+func (p *Producer) PublishOfferAccepted(ctx context.Context, o *offer.Offer, customerID uuid.UUID, customerEmail string, masterEmail string) error {
 	msg := map[string]interface{}{
-		"offer_id":      o.ID.String(),
-		"order_id":      o.OrderID.String(),
-		"master_id":     o.MasterID.String(),
-		"customer_id":   customerID.String(),
+		"offer_id":       o.ID.String(),
+		"order_id":       o.OrderID.String(),
+		"master_id":      o.MasterID.String(),
+		"customer_id":    customerID.String(),
+		"master_email":   masterEmail,
 		"customer_email": customerEmail,
-		"price":         o.Price,
-		"timestamp":     time.Now().UTC().Format(time.RFC3339),
+		"price":          o.Price,
+		"timestamp":      time.Now().UTC().Format(time.RFC3339),
 	}
 
 	return p.publish(ctx, "offer.accepted", o.ID, msg)

@@ -12,4 +12,5 @@ var (
 	ErrMessageTooLong      = errors.New("сообщение превышает максимальную длину в 1000 символов")
 	ErrInvalidOfferID      = errors.New("недействительный ID предложения")
 	ErrInvalidOrderID      = errors.New("недействительный ID заказа")
+	ErrAssignOrderFailed   = errors.New("не удалось назначить заказ")
 )

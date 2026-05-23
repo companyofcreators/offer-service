@@ -2,15 +2,22 @@ package offer
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"log/slog"
 
 	"github.com/google/uuid"
 )
 
+// Broadcaster defines the contract for broadcasting offer events via WebSocket.
+type Broadcaster interface {
+	BroadcastToOrder(orderID uuid.UUID, eventType string, data json.RawMessage)
+}
+
 // EventPublisher defines the contract for publishing domain events to Kafka.
 type EventPublisher interface {
 	PublishOfferCreated(ctx context.Context, offer *Offer, masterEmail string) error
-	PublishOfferAccepted(ctx context.Context, offer *Offer, customerID uuid.UUID, customerEmail string) error
+	PublishOfferAccepted(ctx context.Context, offer *Offer, customerID uuid.UUID, customerEmail string, masterEmail string) error
 	PublishOfferRejected(ctx context.Context, offerID, orderID uuid.UUID) error
 	PublishOfferWithdrawn(ctx context.Context, offer *Offer) error
 	PublishOfferCountered(ctx context.Context, offerID, orderID, customerID uuid.UUID, proposedPrice float64) error
@@ -31,6 +38,7 @@ type Service struct {
 	events      NegotiationEventRepository
 	publisher   EventPublisher
 	orderClient OrderClient
+	broadcaster Broadcaster
 	logger      *slog.Logger
 }
 
@@ -40,6 +48,7 @@ func NewService(
 	events NegotiationEventRepository,
 	publisher EventPublisher,
 	orderClient OrderClient,
+	broadcaster Broadcaster,
 	logger *slog.Logger,
 ) *Service {
 	return &Service{
@@ -47,8 +56,21 @@ func NewService(
 		events:      events,
 		publisher:   publisher,
 		orderClient: orderClient,
+		broadcaster: broadcaster,
 		logger:      logger,
 	}
+}
+
+func (s *Service) broadcastOffer(orderID uuid.UUID, eventType string, payload interface{}) {
+	if s.broadcaster == nil {
+		return
+	}
+	data, err := json.Marshal(payload)
+	if err != nil {
+		s.logger.Error("failed to marshal ws broadcast", "error", err)
+		return
+	}
+	s.broadcaster.BroadcastToOrder(orderID, eventType, data)
 }
 
 // SendOffer creates a new pending offer from a master for an order.
@@ -72,6 +94,7 @@ func (s *Service) SendOffer(ctx context.Context, orderID, masterID uuid.UUID, pr
 	}
 
 	offer := NewOffer(orderID, masterID, price, message)
+	offer.MasterEmail = masterEmail
 
 	if err := s.offers.Create(ctx, offer); err != nil {
 		return nil, err
@@ -94,6 +117,7 @@ func (s *Service) SendOffer(ctx context.Context, orderID, masterID uuid.UUID, pr
 		s.logger.Warn("failed to publish offer created event", "error", err, "offer_id", offer.ID)
 	}
 
+	s.broadcastOffer(orderID, "offer.created", offer)
 	return offer, nil
 }
 
@@ -136,6 +160,7 @@ func (s *Service) WithdrawOffer(ctx context.Context, offerID, masterID uuid.UUID
 		s.logger.Warn("failed to publish offer withdrawn event", "error", err, "offer_id", offer.ID)
 	}
 
+	s.broadcastOffer(offer.OrderID, "offer.updated", offer)
 	return offer, nil
 }
 
@@ -169,7 +194,13 @@ func (s *Service) AcceptOffer(ctx context.Context, offerID, customerID uuid.UUID
 
 	// Update order status to assigned via direct API call.
 	if err := s.orderClient.AssignOrder(ctx, offer.OrderID, offerID); err != nil {
-		s.logger.Warn("failed to assign order via API", "error", err, "order_id", offer.OrderID, "offer_id", offerID)
+		s.logger.Error("failed to assign order, rolling back offer status",
+			"error", err, "offer_id", offerID, "order_id", offer.OrderID)
+		if rollbackErr := s.offers.UpdateStatus(ctx, offerID, OfferPending); rollbackErr != nil {
+			s.logger.Error("CRITICAL: failed to rollback after AssignOrder failure",
+				"error", rollbackErr, "offer_id", offerID)
+		}
+		return nil, fmt.Errorf("не удалось назначить заказ: %w", err)
 	}
 
 	event := NewNegotiationEvent(
@@ -185,10 +216,11 @@ func (s *Service) AcceptOffer(ctx context.Context, offerID, customerID uuid.UUID
 		return nil, err
 	}
 
-	if err := s.publisher.PublishOfferAccepted(ctx, offer, customerID, customerEmail); err != nil {
+	if err := s.publisher.PublishOfferAccepted(ctx, offer, customerID, customerEmail, offer.MasterEmail); err != nil {
 		s.logger.Warn("failed to publish offer accepted event", "error", err, "offer_id", offer.ID)
 	}
 
+	s.broadcastOffer(offer.OrderID, "offer.updated", offer)
 	return offer, nil
 }
 
@@ -232,6 +264,7 @@ func (s *Service) RejectOffer(ctx context.Context, offerID, customerID uuid.UUID
 		s.logger.Warn("failed to publish offer rejected event", "error", err, "offer_id", offerID)
 	}
 
+	s.broadcastOffer(offer.OrderID, "offer.updated", offer)
 	return offer, nil
 }
 
@@ -275,6 +308,7 @@ func (s *Service) CounterOffer(ctx context.Context, offerID, customerID uuid.UUI
 		s.logger.Warn("failed to publish offer countered event", "error", err, "offer_id", offerID)
 	}
 
+	s.broadcastOffer(offer.OrderID, "offer.countered", event)
 	return event, nil
 }
 

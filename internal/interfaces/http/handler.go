@@ -292,10 +292,20 @@ func (h *Handler) ListOffers(w http.ResponseWriter, r *http.Request) {
 		limit := 20
 		offset := 0
 		if l := query.Get("limit"); l != "" {
-			limit, _ = strconv.Atoi(l)
+			var err error
+			limit, err = strconv.Atoi(l)
+			if err != nil {
+				slog.Warn("invalid limit query param, using default", "value", l, "error", err)
+				limit = 0
+			}
 		}
 		if o := query.Get("offset"); o != "" {
-			offset, _ = strconv.Atoi(o)
+			var err error
+			offset, err = strconv.Atoi(o)
+			if err != nil {
+				slog.Warn("invalid offset query param, using default", "value", o, "error", err)
+				offset = 0
+			}
 		}
 
 		offers, total, err := h.service.ListOffersByMaster(r.Context(), masterID, statusFilter, limit, offset)

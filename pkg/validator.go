@@ -10,11 +10,11 @@ import (
 	"github.com/go-playground/validator/v10"
 )
 
-var Validate *validator.Validate
+type ValidationErrors map[string]string
 
-func init() {
-	Validate = validator.New()
-	Validate.RegisterTagNameFunc(func(fld reflect.StructField) string {
+func ValidateStruct(s interface{}) ValidationErrors {
+	validate := validator.New()
+	validate.RegisterTagNameFunc(func(fld reflect.StructField) string {
 		tag := fld.Tag.Get("json")
 		name := strings.SplitN(tag, ",", 2)[0]
 		if name == "" || name == "-" {
@@ -22,12 +22,7 @@ func init() {
 		}
 		return name
 	})
-}
-
-type ValidationErrors map[string]string
-
-func ValidateStruct(s interface{}) ValidationErrors {
-	err := Validate.Struct(s)
+	err := validate.Struct(s)
 	if err == nil {
 		return nil
 	}

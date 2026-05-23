@@ -25,12 +25,12 @@ func NewOfferRepo(pool *sqlx.DB) *OfferRepo {
 
 func (r *OfferRepo) Create(ctx context.Context, o *offer.Offer) error {
 	query := `
-		INSERT INTO offers (id, order_id, master_id, price, message, status, created_at, updated_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+		INSERT INTO offers (id, order_id, master_id, master_email, price, message, status, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
 	`
 
 	_, err := r.pool.ExecContext(ctx, query,
-		o.ID, o.OrderID, o.MasterID, o.Price, o.Message, string(o.Status), o.CreatedAt, o.UpdatedAt,
+		o.ID, o.OrderID, o.MasterID, o.MasterEmail, o.Price, o.Message, string(o.Status), o.CreatedAt, o.UpdatedAt,
 	)
 	if err != nil {
 		return fmt.Errorf("failed to create offer: %w", err)
@@ -41,7 +41,7 @@ func (r *OfferRepo) Create(ctx context.Context, o *offer.Offer) error {
 
 func (r *OfferRepo) FindByID(ctx context.Context, id uuid.UUID) (*offer.Offer, error) {
 	query := `
-		SELECT id, order_id, master_id, price, message, status, created_at, updated_at
+		SELECT id, order_id, master_id, master_email, price, message, status, created_at, updated_at
 		FROM offers
 		WHERE id = $1
 	`
@@ -49,7 +49,7 @@ func (r *OfferRepo) FindByID(ctx context.Context, id uuid.UUID) (*offer.Offer, e
 	var o offer.Offer
 	var status string
 	err := r.pool.QueryRowContext(ctx, query, id).Scan(
-		&o.ID, &o.OrderID, &o.MasterID, &o.Price, &o.Message, &status, &o.CreatedAt, &o.UpdatedAt,
+		&o.ID, &o.OrderID, &o.MasterID, &o.MasterEmail, &o.Price, &o.Message, &status, &o.CreatedAt, &o.UpdatedAt,
 	)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -63,7 +63,7 @@ func (r *OfferRepo) FindByID(ctx context.Context, id uuid.UUID) (*offer.Offer, e
 
 func (r *OfferRepo) ListByOrder(ctx context.Context, orderID uuid.UUID) ([]*offer.Offer, error) {
 	query := `
-		SELECT id, order_id, master_id, price, message, status, created_at, updated_at
+		SELECT id, order_id, master_id, master_email, price, message, status, created_at, updated_at
 		FROM offers
 		WHERE order_id = $1
 		ORDER BY created_at DESC
@@ -80,25 +80,23 @@ func (r *OfferRepo) ListByOrder(ctx context.Context, orderID uuid.UUID) ([]*offe
 
 func (r *OfferRepo) ListByMaster(ctx context.Context, masterID uuid.UUID, status *offer.OfferStatus, limit, offset int) ([]*offer.Offer, int, error) {
 	args := []interface{}{masterID}
-	argIdx := 2
 
 	var countQuery, dataQuery string
 
 	if status != nil {
 		countQuery = `SELECT COUNT(*) FROM offers WHERE master_id = $1 AND status = $2`
 		dataQuery = `
-			SELECT id, order_id, master_id, price, message, status, created_at, updated_at
+			SELECT id, order_id, master_id, master_email, price, message, status, created_at, updated_at
 			FROM offers
 			WHERE master_id = $1 AND status = $2
 			ORDER BY created_at DESC
 			LIMIT $3 OFFSET $4
 		`
 		args = append(args, string(*status))
-		argIdx = 3
 	} else {
 		countQuery = `SELECT COUNT(*) FROM offers WHERE master_id = $1`
 		dataQuery = `
-			SELECT id, order_id, master_id, price, message, status, created_at, updated_at
+			SELECT id, order_id, master_id, master_email, price, message, status, created_at, updated_at
 			FROM offers
 			WHERE master_id = $1
 			ORDER BY created_at DESC
@@ -129,7 +127,6 @@ func (r *OfferRepo) ListByMaster(ctx context.Context, masterID uuid.UUID, status
 	if err != nil {
 		return nil, 0, err
 	}
-	_ = argIdx // suppress unused variable warning
 	return offers, total, nil
 }
 
@@ -145,7 +142,10 @@ func (r *OfferRepo) UpdateStatus(ctx context.Context, id uuid.UUID, status offer
 		return fmt.Errorf("failed to update offer status: %w", err)
 	}
 
-	rowsAffected, _ := result.RowsAffected()
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("failed to get rows affected: %w", err)
+	}
 	if rowsAffected == 0 {
 		return offer.ErrOfferNotFound
 	}
@@ -188,7 +188,7 @@ func (r *OfferRepo) CountPending(ctx context.Context, orderID uuid.UUID) (int, e
 
 func (r *OfferRepo) FindPendingByMasterAndOrder(ctx context.Context, masterID, orderID uuid.UUID) (*offer.Offer, error) {
 	query := `
-		SELECT id, order_id, master_id, price, message, status, created_at, updated_at
+		SELECT id, order_id, master_id, master_email, price, message, status, created_at, updated_at
 		FROM offers
 		WHERE master_id = $1 AND order_id = $2 AND status = $3
 	`
@@ -196,7 +196,7 @@ func (r *OfferRepo) FindPendingByMasterAndOrder(ctx context.Context, masterID, o
 	var o offer.Offer
 	var status string
 	err := r.pool.QueryRowContext(ctx, query, masterID, orderID, string(offer.OfferPending)).Scan(
-		&o.ID, &o.OrderID, &o.MasterID, &o.Price, &o.Message, &status, &o.CreatedAt, &o.UpdatedAt,
+		&o.ID, &o.OrderID, &o.MasterID, &o.MasterEmail, &o.Price, &o.Message, &status, &o.CreatedAt, &o.UpdatedAt,
 	)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -274,7 +274,7 @@ func scanOffers(rows *sql.Rows) ([]*offer.Offer, error) {
 	for rows.Next() {
 		var o offer.Offer
 		var status string
-		if err := rows.Scan(&o.ID, &o.OrderID, &o.MasterID, &o.Price, &o.Message, &status, &o.CreatedAt, &o.UpdatedAt); err != nil {
+		if err := rows.Scan(&o.ID, &o.OrderID, &o.MasterID, &o.MasterEmail, &o.Price, &o.Message, &status, &o.CreatedAt, &o.UpdatedAt); err != nil {
 			return nil, fmt.Errorf("failed to scan offer row: %w", err)
 		}
 		o.Status = offer.OfferStatus(status)

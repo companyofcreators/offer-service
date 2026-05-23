@@ -36,14 +36,15 @@ func (s OfferStatus) String() string {
 // Offer represents a master's price proposal for an order.
 // Offers are immutable once created; only the status changes.
 type Offer struct {
-	ID        uuid.UUID
-	OrderID   uuid.UUID
-	MasterID  uuid.UUID
-	Price     float64
-	Message   string
-	Status    OfferStatus
-	CreatedAt time.Time
-	UpdatedAt time.Time
+	ID          uuid.UUID
+	OrderID     uuid.UUID
+	MasterID    uuid.UUID
+	MasterEmail string
+	Price       float64
+	Message     string
+	Status      OfferStatus
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
 }
 
 // NewOffer creates a new pending offer.

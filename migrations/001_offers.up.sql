@@ -6,6 +6,7 @@ CREATE TABLE offers (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     order_id UUID NOT NULL,
     master_id UUID NOT NULL,
+    master_email VARCHAR(255) NOT NULL DEFAULT '',
     price DECIMAL(12,2) NOT NULL CHECK (price > 0),
     message TEXT NOT NULL,
     status VARCHAR(20) NOT NULL DEFAULT 'pending'

@@ -12,23 +12,26 @@ import (
 	"github.com/google/uuid"
 
 	offerDomain "github.com/companyofcreators/offer-service/internal/domain/offer"
+	"github.com/companyofcreators/offer-service/pkg/header_auth"
 )
 
 // OrderClient communicates with the Order Service to validate customer ownership.
 type OrderClient struct {
 	baseURL    string
 	httpClient *http.Client
+	signer     *header_auth.HeaderSigner
 	log        *slog.Logger
 }
 
 // NewOrderClient creates a new OrderClient.
-func NewOrderClient(baseURL string, log *slog.Logger) *OrderClient {
+func NewOrderClient(baseURL string, signer *header_auth.HeaderSigner, log *slog.Logger) *OrderClient {
 	return &OrderClient{
 		baseURL: baseURL,
 		httpClient: &http.Client{
 			Timeout: 10 * time.Second,
 		},
-		log: log,
+		signer: signer,
+		log:    log,
 	}
 }
 
@@ -49,6 +52,10 @@ func (c *OrderClient) ValidateOrderOwnership(ctx context.Context, orderID, custo
 
 	req.Header.Set("X-User-Id", customerID.String())
 	req.Header.Set("X-User-Role", "customer")
+
+	// Sign the internal headers so the order-service can verify they came
+	// from a trusted internal caller.
+	c.signer.SignHeaders(req)
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
@@ -86,27 +93,60 @@ func (c *OrderClient) ValidateOrderOwnership(ctx context.Context, orderID, custo
 }
 
 // AssignOrder updates the order status to "assigned" and sets the accepted offer ID.
+// Retries up to 3 times with exponential backoff (1s, 2s, 4s) on failure.
 func (c *OrderClient) AssignOrder(ctx context.Context, orderID, offerID uuid.UUID) error {
 	url := fmt.Sprintf("%s/internal/orders/%s/assign", c.baseURL, orderID.String())
 
-	body := map[string]string{"offer_id": offerID.String()}
-	bodyJSON, _ := json.Marshal(body)
+	var lastErr error
+	const maxAttempts = 4 // 1 initial + 3 retries
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(bodyJSON))
-	if err != nil {
-		return fmt.Errorf("failed to create assign request: %w", err)
+	for attempt := 0; attempt < maxAttempts; attempt++ {
+		if attempt > 0 {
+			backoff := time.Duration(1<<uint(attempt-1)) * time.Second // 1s, 2s, 4s
+			select {
+			case <-ctx.Done():
+				return fmt.Errorf("assign order cancelled: %w", ctx.Err())
+			case <-time.After(backoff):
+			}
+		}
+
+		body := map[string]string{"offer_id": offerID.String()}
+		bodyJSON, err := json.Marshal(body)
+		if err != nil {
+			lastErr = fmt.Errorf("failed to marshal assign body: %w", err)
+			c.log.WarnContext(ctx, "assign order marshal failed, retrying",
+				"attempt", attempt+1, "max_attempts", maxAttempts, "error", err)
+			continue
+		}
+
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(bodyJSON))
+		if err != nil {
+			lastErr = fmt.Errorf("failed to create assign request: %w", err)
+			c.log.WarnContext(ctx, "assign order request creation failed, retrying",
+				"attempt", attempt+1, "max_attempts", maxAttempts, "error", err)
+			continue
+		}
+		req.Header.Set("Content-Type", "application/json")
+
+		resp, err := c.httpClient.Do(req)
+		if err != nil {
+			lastErr = fmt.Errorf("failed to assign order: %w", err)
+			c.log.WarnContext(ctx, "assign order HTTP call failed, retrying",
+				"attempt", attempt+1, "max_attempts", maxAttempts, "error", err)
+			continue
+		}
+
+		if resp.StatusCode != http.StatusOK {
+			resp.Body.Close()
+			lastErr = fmt.Errorf("order service returned status %d", resp.StatusCode)
+			c.log.WarnContext(ctx, "assign order received non-OK status, retrying",
+				"attempt", attempt+1, "max_attempts", maxAttempts, "status", resp.StatusCode)
+			continue
+		}
+
+		resp.Body.Close()
+		return nil
 	}
-	req.Header.Set("Content-Type", "application/json")
 
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		return fmt.Errorf("failed to assign order: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("order service returned status %d", resp.StatusCode)
-	}
-
-	return nil
+	return fmt.Errorf("assign order failed after %d attempts: %w", maxAttempts, lastErr)
 }
