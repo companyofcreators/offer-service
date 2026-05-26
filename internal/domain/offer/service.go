@@ -18,9 +18,9 @@ type Broadcaster interface {
 type EventPublisher interface {
 	PublishOfferCreated(ctx context.Context, offer *Offer, masterEmail string) error
 	PublishOfferAccepted(ctx context.Context, offer *Offer, customerID uuid.UUID, customerEmail string, masterEmail string) error
-	PublishOfferRejected(ctx context.Context, offerID, orderID uuid.UUID) error
+	PublishOfferRejected(ctx context.Context, offer *Offer) error
 	PublishOfferWithdrawn(ctx context.Context, offer *Offer) error
-	PublishOfferCountered(ctx context.Context, offerID, orderID, customerID uuid.UUID, proposedPrice float64) error
+	PublishOfferCountered(ctx context.Context, offer *Offer, customerID uuid.UUID, proposedPrice float64, message string) error
 	PublishOfferUpdated(ctx context.Context, offer *Offer) error
 }
 
@@ -260,7 +260,7 @@ func (s *Service) RejectOffer(ctx context.Context, offerID, customerID uuid.UUID
 		return nil, err
 	}
 
-	if err := s.publisher.PublishOfferRejected(ctx, offerID, offer.OrderID); err != nil {
+	if err := s.publisher.PublishOfferRejected(ctx, offer); err != nil {
 		s.logger.Warn("failed to publish offer rejected event", "error", err, "offer_id", offerID)
 	}
 
@@ -304,7 +304,7 @@ func (s *Service) CounterOffer(ctx context.Context, offerID, customerID uuid.UUI
 		return nil, err
 	}
 
-	if err := s.publisher.PublishOfferCountered(ctx, offerID, offer.OrderID, customerID, price); err != nil {
+	if err := s.publisher.PublishOfferCountered(ctx, offer, customerID, price, message); err != nil {
 		s.logger.Warn("failed to publish offer countered event", "error", err, "offer_id", offerID)
 	}
 

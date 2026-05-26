@@ -74,14 +74,16 @@ func (p *Producer) PublishOfferAccepted(ctx context.Context, o *offer.Offer, cus
 }
 
 // PublishOfferRejected publishes an offer.rejected event.
-func (p *Producer) PublishOfferRejected(ctx context.Context, offerID, orderID uuid.UUID) error {
+func (p *Producer) PublishOfferRejected(ctx context.Context, o *offer.Offer) error {
 	msg := map[string]interface{}{
-		"offer_id":  offerID.String(),
-		"order_id":  orderID.String(),
+		"offer_id":  o.ID.String(),
+		"order_id":  o.OrderID.String(),
+		"master_id": o.MasterID.String(),
+		"price":     o.Price,
 		"timestamp": time.Now().UTC().Format(time.RFC3339),
 	}
 
-	return p.publish(ctx, "offer.rejected", offerID, msg)
+	return p.publish(ctx, "offer.rejected", o.ID, msg)
 }
 
 // PublishOfferWithdrawn publishes an offer.withdrawn event.
@@ -97,16 +99,19 @@ func (p *Producer) PublishOfferWithdrawn(ctx context.Context, o *offer.Offer) er
 }
 
 // PublishOfferCountered publishes an offer.countered event.
-func (p *Producer) PublishOfferCountered(ctx context.Context, offerID, orderID, customerID uuid.UUID, proposedPrice float64) error {
+func (p *Producer) PublishOfferCountered(ctx context.Context, o *offer.Offer, customerID uuid.UUID, proposedPrice float64, message string) error {
 	msg := map[string]interface{}{
-		"offer_id":       offerID.String(),
-		"order_id":       orderID.String(),
+		"offer_id":       o.ID.String(),
+		"order_id":       o.OrderID.String(),
+		"master_id":      o.MasterID.String(),
 		"customer_id":    customerID.String(),
+		"counter_price":  proposedPrice,
 		"proposed_price": proposedPrice,
+		"message":        message,
 		"timestamp":      time.Now().UTC().Format(time.RFC3339),
 	}
 
-	return p.publish(ctx, "offer.countered", offerID, msg)
+	return p.publish(ctx, "offer.countered", o.ID, msg)
 }
 
 // PublishOfferUpdated publishes a generic offer.updated event.
