@@ -38,9 +38,12 @@ func (s OfferStatus) String() string {
 type Offer struct {
 	ID          uuid.UUID
 	OrderID     uuid.UUID
-	MasterID    uuid.UUID
-	MasterEmail string
-	Price       float64
+	MasterID     uuid.UUID
+	MasterEmail  string
+	MasterName   string  `json:"-"`
+	MasterAvatar string  `json:"-"`
+	MasterRating float64 `json:"-"`
+	Price        float64
 	Message     string
 	Status      OfferStatus
 	CreatedAt   time.Time

@@ -14,6 +14,11 @@ type Broadcaster interface {
 	BroadcastToOrder(orderID uuid.UUID, eventType string, data json.RawMessage)
 }
 
+// ChatCreator creates a chat between customer and master when an offer is accepted.
+type ChatCreator interface {
+	CreateChat(ctx context.Context, orderID, customerID, masterID uuid.UUID) (string, error)
+}
+
 // EventPublisher defines the contract for publishing domain events to Kafka.
 type EventPublisher interface {
 	PublishOfferCreated(ctx context.Context, offer *Offer, masterEmail string) error
@@ -29,7 +34,7 @@ type OrderClient interface {
 	// ValidateOrderOwnership checks if the given user is the customer of the given order.
 	ValidateOrderOwnership(ctx context.Context, orderID, customerID uuid.UUID) error
 	// AssignOrder updates the order status to "assigned" and sets the accepted offer.
-	AssignOrder(ctx context.Context, orderID, offerID uuid.UUID) error
+	AssignOrder(ctx context.Context, orderID, offerID, masterID uuid.UUID, finalPrice float64) error
 }
 
 // Service implements the core business logic for offer negotiations.
@@ -39,6 +44,7 @@ type Service struct {
 	publisher   EventPublisher
 	orderClient OrderClient
 	broadcaster Broadcaster
+	chatCreator ChatCreator
 	logger      *slog.Logger
 }
 
@@ -49,6 +55,7 @@ func NewService(
 	publisher EventPublisher,
 	orderClient OrderClient,
 	broadcaster Broadcaster,
+	chatCreator ChatCreator,
 	logger *slog.Logger,
 ) *Service {
 	return &Service{
@@ -57,8 +64,14 @@ func NewService(
 		publisher:   publisher,
 		orderClient: orderClient,
 		broadcaster: broadcaster,
+		chatCreator: chatCreator,
 		logger:      logger,
 	}
+}
+
+// BroadcastOffer re-broadcasts an offer with enriched data (master_name etc) over WebSocket.
+func (s *Service) BroadcastOffer(ctx context.Context, orderID uuid.UUID, offer *Offer, enriched interface{}) {
+	s.broadcastOffer(orderID, "offer.created", enriched)
 }
 
 func (s *Service) broadcastOffer(orderID uuid.UUID, eventType string, payload interface{}) {
@@ -77,9 +90,6 @@ func (s *Service) broadcastOffer(orderID uuid.UUID, eventType string, payload in
 func (s *Service) SendOffer(ctx context.Context, orderID, masterID uuid.UUID, price float64, message string, masterEmail string) (*Offer, error) {
 	if price <= 0 {
 		return nil, ErrInvalidPrice
-	}
-	if message == "" {
-		return nil, ErrEmptyMessage
 	}
 	if len(message) > 1000 {
 		return nil, ErrMessageTooLong
@@ -193,7 +203,7 @@ func (s *Service) AcceptOffer(ctx context.Context, offerID, customerID uuid.UUID
 	}
 
 	// Update order status to assigned via direct API call.
-	if err := s.orderClient.AssignOrder(ctx, offer.OrderID, offerID); err != nil {
+	if err := s.orderClient.AssignOrder(ctx, offer.OrderID, offerID, offer.MasterID, offer.Price); err != nil {
 		s.logger.Error("failed to assign order, rolling back offer status",
 			"error", err, "offer_id", offerID, "order_id", offer.OrderID)
 		if rollbackErr := s.offers.UpdateStatus(ctx, offerID, OfferPending); rollbackErr != nil {
@@ -201,6 +211,16 @@ func (s *Service) AcceptOffer(ctx context.Context, offerID, customerID uuid.UUID
 				"error", rollbackErr, "offer_id", offerID)
 		}
 		return nil, fmt.Errorf("не удалось назначить заказ: %w", err)
+	}
+
+	// Auto-create chat between customer and master
+	if s.chatCreator != nil {
+		chatID, chatErr := s.chatCreator.CreateChat(ctx, offer.OrderID, customerID, offer.MasterID)
+		if chatErr != nil {
+			s.logger.Warn("failed to auto-create chat after accept", "error", chatErr, "order_id", offer.OrderID)
+		} else if chatID != "" {
+			s.logger.Info("chat auto-created after offer acceptance", "chat_id", chatID, "order_id", offer.OrderID)
+		}
 	}
 
 	event := NewNegotiationEvent(

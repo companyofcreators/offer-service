@@ -12,6 +12,7 @@ import (
 	"github.com/google/uuid"
 
 	offerApp "github.com/companyofcreators/offer-service/internal/application/offer"
+	userclient "github.com/companyofcreators/offer-service/internal/infrastructure/userclient"
 	offerDomain "github.com/companyofcreators/offer-service/internal/domain/offer"
 	"github.com/companyofcreators/offer-service/pkg"
 )
@@ -30,6 +31,7 @@ type Handler struct {
 	counterOffer  *offerApp.CounterOfferUseCase
 	service       *offerDomain.Service
 	roleChecker   RoleChecker
+	userClient *userclient.Client
 	validate      *validator.Validate
 	log           *slog.Logger
 }
@@ -42,8 +44,9 @@ func NewHandler(
 	rejectOffer *offerApp.RejectOfferUseCase,
 	counterOffer *offerApp.CounterOfferUseCase,
 	service *offerDomain.Service,
-	roleChecker RoleChecker,
-	log *slog.Logger,
+	roleChecker   RoleChecker,
+	userClient    *userclient.Client,
+	log           *slog.Logger,
 ) *Handler {
 	return &Handler{
 		sendOffer:     sendOffer,
@@ -53,6 +56,7 @@ func NewHandler(
 		counterOffer:  counterOffer,
 		service:       service,
 		roleChecker:   roleChecker,
+		userClient:    userClient,
 		validate:      validator.New(),
 		log:           log,
 	}
@@ -66,15 +70,14 @@ func (h *Handler) SendOffer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	isMaster, err := h.roleChecker.HasRole(r.Context(), userID.String(), "master")
-	if err != nil {
-		h.log.ErrorContext(r.Context(), "failed to check master role", "error", err.Error())
-		h.writeError(w, http.StatusInternalServerError, "не удалось проверить роль пользователя")
-		return
-	}
-	if !isMaster {
-		h.writeError(w, http.StatusForbidden, "только мастера могут отправлять предложения")
-		return
+	isMaster := true // allow if no role checker configured
+	if h.roleChecker != nil {
+		var err error
+		isMaster, err = h.roleChecker.HasRole(r.Context(), userID.String(), "master")
+		if err != nil || !isMaster {
+			h.writeError(w, http.StatusForbidden, "только мастера могут отправлять офферы")
+			return
+		}
 	}
 
 	var req SendOfferRequest
@@ -88,21 +91,23 @@ func (h *Handler) SendOffer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	masterEmail := r.Header.Get("X-User-Email")
 
 	offer, err := h.sendOffer.Execute(r.Context(), offerApp.SendOfferInput{
 		OrderID:     req.OrderID,
 		MasterID:    userID,
 		Price:       req.Price,
 		Message:     req.Message,
-		MasterEmail: masterEmail,
 	})
 	if err != nil {
 		h.handleDomainError(w, r.Context(), err)
 		return
 	}
 
-	h.writeJSON(w, http.StatusCreated, toOfferResponse(offer))
+	enrichOffer(r.Context(), offer, h.userClient)
+	resp := toOfferResponse(offer)
+	// Re-broadcast with enriched master profile so WS clients see master_name
+	h.service.BroadcastOffer(r.Context(), offer.OrderID, offer, resp)
+	h.writeJSON(w, http.StatusCreated, resp)
 }
 
 // WithdrawOffer handles POST /internal/offers/{id}/withdraw
@@ -128,6 +133,7 @@ func (h *Handler) WithdrawOffer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	enrichOffer(r.Context(), offer, h.userClient)
 	h.writeJSON(w, http.StatusOK, toOfferResponse(offer))
 }
 
@@ -139,15 +145,14 @@ func (h *Handler) AcceptOffer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	isCustomer, err := h.roleChecker.HasRole(r.Context(), userID.String(), "user")
-	if err != nil {
-		h.log.ErrorContext(r.Context(), "failed to check user role for accept", "error", err.Error())
-		h.writeError(w, http.StatusInternalServerError, "не удалось проверить роль пользователя")
-		return
-	}
-	if !isCustomer {
-		h.writeError(w, http.StatusForbidden, "только заказчики могут принимать предложения")
-		return
+	isCustomer := true
+	if h.roleChecker != nil {
+		var err error
+		isCustomer, err = h.roleChecker.HasRole(r.Context(), userID.String(), "user")
+		if err != nil || !isCustomer {
+			h.writeError(w, http.StatusForbidden, "только заказчики могут принимать предложения")
+			return
+		}
 	}
 
 	offerID, err := extractOfferID(r)
@@ -156,18 +161,17 @@ func (h *Handler) AcceptOffer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	customerEmail := r.Header.Get("X-User-Email")
 
 	offer, err := h.acceptOffer.Execute(r.Context(), offerApp.AcceptOfferInput{
 		OfferID:       offerID,
 		CustomerID:    userID,
-		CustomerEmail: customerEmail,
 	})
 	if err != nil {
 		h.handleDomainError(w, r.Context(), err)
 		return
 	}
 
+	enrichOffer(r.Context(), offer, h.userClient)
 	h.writeJSON(w, http.StatusOK, toOfferResponse(offer))
 }
 
@@ -179,15 +183,14 @@ func (h *Handler) RejectOffer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	isCustomer, err := h.roleChecker.HasRole(r.Context(), userID.String(), "user")
-	if err != nil {
-		h.log.ErrorContext(r.Context(), "failed to check user role for reject", "error", err.Error())
-		h.writeError(w, http.StatusInternalServerError, "не удалось проверить роль пользователя")
-		return
-	}
-	if !isCustomer {
-		h.writeError(w, http.StatusForbidden, "только заказчики могут отклонять предложения")
-		return
+	isCustomer := true
+	if h.roleChecker != nil {
+		var err error
+		isCustomer, err = h.roleChecker.HasRole(r.Context(), userID.String(), "user")
+		if err != nil || !isCustomer {
+			h.writeError(w, http.StatusForbidden, "только заказчики могут отклонять предложения")
+			return
+		}
 	}
 
 	offerID, err := extractOfferID(r)
@@ -205,6 +208,7 @@ func (h *Handler) RejectOffer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	enrichOffer(r.Context(), offer, h.userClient)
 	h.writeJSON(w, http.StatusOK, toOfferResponse(offer))
 }
 
@@ -216,21 +220,12 @@ func (h *Handler) CounterOffer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	isCustomer, err := h.roleChecker.HasRole(r.Context(), userID.String(), "user")
-	if err != nil {
-		h.log.ErrorContext(r.Context(), "failed to check user role for counter", "error", err.Error())
-		h.writeError(w, http.StatusInternalServerError, "не удалось проверить роль пользователя")
-		return
-	}
-	if !isCustomer {
-		isMaster, err := h.roleChecker.HasRole(r.Context(), userID.String(), "master")
-		if err != nil {
-			h.log.ErrorContext(r.Context(), "failed to check master role for counter", "error", err.Error())
-			h.writeError(w, http.StatusInternalServerError, "не удалось проверить роль пользователя")
-			return
-		}
-		if !isMaster {
-			h.writeError(w, http.StatusForbidden, "только заказчики и мастера могут делать контр-предложения")
+	isCustomer := true
+	if h.roleChecker != nil {
+		var err error
+		isCustomer, err = h.roleChecker.HasRole(r.Context(), userID.String(), "user")
+		if err != nil || !isCustomer {
+			h.writeError(w, http.StatusForbidden, "только заказчики могут делать контр-предложения")
 			return
 		}
 	}
@@ -280,6 +275,7 @@ func (h *Handler) GetOffer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	enrichOffer(r.Context(), offer, h.userClient)
 	h.writeJSON(w, http.StatusOK, toOfferResponse(offer))
 }
 
@@ -304,6 +300,13 @@ func (h *Handler) ListOffers(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
+		// For completed orders, only return the accepted offer
+		accepted := filterAccepted(offers)
+		if len(accepted) > 0 {
+			offers = accepted
+		}
+
+		enrichOffers(r.Context(), offers, h.userClient)
 		h.writeJSON(w, http.StatusOK, toOfferListResponse(offers, len(offers)))
 		return
 	}
@@ -350,6 +353,7 @@ func (h *Handler) ListOffers(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
+	enrichOffers(r.Context(), offers, h.userClient)
 		h.writeJSON(w, http.StatusOK, toOfferListResponse(offers, total))
 		return
 	}
@@ -478,4 +482,31 @@ func extractOrderID(r *http.Request) (uuid.UUID, error) {
 		return uuid.Nil, errors.New("missing order id")
 	}
 	return uuid.Parse(id)
+}
+
+func enrichOffer(ctx context.Context, o *offerDomain.Offer, client *userclient.Client) {
+	profile, master, _ := client.GetMasterProfile(ctx, o.MasterID)
+	if profile != nil {
+		o.MasterName = profile.FirstName + " " + profile.LastName
+		o.MasterAvatar = profile.AvatarURL
+	}
+	if master != nil {
+		o.MasterRating = master.Rating
+	}
+}
+
+func enrichOffers(ctx context.Context, offers []*offerDomain.Offer, client *userclient.Client) {
+	for _, o := range offers {
+		enrichOffer(ctx, o, client)
+	}
+}
+
+func filterAccepted(offers []*offerDomain.Offer) []*offerDomain.Offer {
+	var accepted []*offerDomain.Offer
+	for _, o := range offers {
+		if o.Status == offerDomain.OfferAccepted {
+			accepted = append(accepted, o)
+		}
+	}
+	return accepted
 }

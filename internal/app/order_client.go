@@ -94,7 +94,7 @@ func (c *OrderClient) ValidateOrderOwnership(ctx context.Context, orderID, custo
 
 // AssignOrder updates the order status to "assigned" and sets the accepted offer ID.
 // Retries up to 3 times with exponential backoff (1s, 2s, 4s) on failure.
-func (c *OrderClient) AssignOrder(ctx context.Context, orderID, offerID uuid.UUID) error {
+func (c *OrderClient) AssignOrder(ctx context.Context, orderID, offerID, masterID uuid.UUID, finalPrice float64) error {
 	url := fmt.Sprintf("%s/internal/orders/%s/assign", c.baseURL, orderID.String())
 
 	var lastErr error
@@ -110,7 +110,11 @@ func (c *OrderClient) AssignOrder(ctx context.Context, orderID, offerID uuid.UUI
 			}
 		}
 
-		body := map[string]string{"offer_id": offerID.String()}
+		body := map[string]interface{}{
+			"offer_id":  offerID.String(),
+			"final_price": finalPrice,
+			"master_id": masterID.String(),
+		}
 		bodyJSON, err := json.Marshal(body)
 		if err != nil {
 			lastErr = fmt.Errorf("failed to marshal assign body: %w", err)

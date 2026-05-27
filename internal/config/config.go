@@ -15,6 +15,7 @@ type Config struct {
 	KafkaBrokers     string `env:"KAFKA_BROKERS" env-default:"localhost:9092"`
 	OrderServiceURL  string `env:"ORDER_SERVICE_URL" env-default:"http://localhost:8083"`
 	UserServiceURL   string `env:"USER_SERVICE_URL" env-default:"http://localhost:8082"`
+	ChatServiceURL  string `env:"CHAT_SERVICE_URL" env-default:"http://localhost:8085"`
 	HeaderHMACKey    string `env:"HEADER_HMAC_KEY" env-default:"diploma-internal-hmac-secret-key-2026"`
 	JWTPublicKeyPath string `env:"JWT_PUBLIC_KEY_PATH" env-default:"../keys/public.pem"`
 	WSAllowedOrigin  string `env:"WS_ALLOWED_ORIGIN" env-default:""`

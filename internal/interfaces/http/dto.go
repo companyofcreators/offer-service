@@ -12,7 +12,7 @@ import (
 type SendOfferRequest struct {
 	OrderID uuid.UUID `json:"order_id" validate:"required,uuid"`
 	Price   float64   `json:"price" validate:"required,gt=0"`
-	Message string    `json:"message" validate:"required,min=1,max=1000"`
+	Message string    `json:"message" validate:"max=1000"`
 }
 
 // CounterOfferRequest represents the request body for a counter-proposal.
@@ -23,13 +23,16 @@ type CounterOfferRequest struct {
 
 // OfferResponse represents the API response for an offer.
 type OfferResponse struct {
-	ID        uuid.UUID `json:"id"`
-	OrderID   uuid.UUID `json:"order_id"`
-	MasterID  uuid.UUID `json:"master_id"`
-	Price     float64   `json:"price"`
-	Message   string    `json:"message"`
-	Status    string    `json:"status"`
-	CreatedAt time.Time `json:"created_at"`
+	ID           uuid.UUID `json:"id"`
+	OrderID      uuid.UUID `json:"order_id"`
+	MasterID     uuid.UUID `json:"master_id"`
+	MasterName   string    `json:"master_name,omitempty"`
+	MasterAvatar string    `json:"master_avatar,omitempty"`
+	MasterRating float64   `json:"master_rating,omitempty"`
+	Price        float64   `json:"price"`
+	Message      string    `json:"message"`
+	Status       string    `json:"status"`
+	CreatedAt    time.Time `json:"created_at"`
 }
 
 // OfferListResponse represents a paginated list of offers.
@@ -64,13 +67,16 @@ type ErrorResponse struct {
 // toOfferResponse converts a domain offer to an API response.
 func toOfferResponse(o *offer.Offer) OfferResponse {
 	return OfferResponse{
-		ID:        o.ID,
-		OrderID:   o.OrderID,
-		MasterID:  o.MasterID,
-		Price:     o.Price,
-		Message:   o.Message,
-		Status:    string(o.Status),
-		CreatedAt: o.CreatedAt,
+		ID:           o.ID,
+		OrderID:      o.OrderID,
+		MasterID:     o.MasterID,
+		MasterName:   o.MasterName,
+		MasterAvatar: o.MasterAvatar,
+		MasterRating: o.MasterRating,
+		Price:        o.Price,
+		Message:      o.Message,
+		Status:       string(o.Status),
+		CreatedAt:    o.CreatedAt,
 	}
 }
 

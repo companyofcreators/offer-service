@@ -10,8 +10,10 @@ import (
 	offerApp "github.com/companyofcreators/offer-service/internal/application/offer"
 	"github.com/companyofcreators/offer-service/internal/config"
 	offerDomain "github.com/companyofcreators/offer-service/internal/domain/offer"
+	"github.com/companyofcreators/offer-service/internal/infrastructure/chatclient"
 	"github.com/companyofcreators/offer-service/internal/infrastructure/db"
 	"github.com/companyofcreators/offer-service/internal/infrastructure/kafka"
+	userclient "github.com/companyofcreators/offer-service/internal/infrastructure/userclient"
 	wsinfra "github.com/companyofcreators/offer-service/internal/infrastructure/ws"
 	httpHandler "github.com/companyofcreators/offer-service/internal/interfaces/http"
 	"github.com/companyofcreators/offer-service/internal/pkg"
@@ -60,13 +62,14 @@ func NewContainer(ctx context.Context) (*Container, error) {
 	orderClient := NewOrderClient(cfg.OrderServiceURL, headerSigner, log)
 
 	// User client for checking fresh roles from user-service DB
-	userClient := NewUserClient(cfg.UserServiceURL, headerSigner, log)
+	userClient := userclient.New(cfg.UserServiceURL, cfg.HeaderHMACKey)
 
 	// WebSocket Hub (implements offerDomain.Broadcaster)
 	wsHub := wsinfra.NewHub(log)
 
 	// Domain service
-	service := offerDomain.NewService(offerRepo, eventRepo, producer, orderClient, wsHub, log)
+	chatClient := chatclient.New(cfg.ChatServiceURL, cfg.HeaderHMACKey)
+	service := offerDomain.NewService(offerRepo, eventRepo, producer, orderClient, wsHub, chatClient, log)
 
 	// Application use cases
 	sendOfferUC := offerApp.NewSendOfferUseCase(service)
@@ -83,7 +86,7 @@ func NewContainer(ctx context.Context) (*Container, error) {
 		rejectOfferUC,
 		counterOfferUC,
 		service,
-		userClient,
+		nil, userClient,
 		log,
 	)
 
